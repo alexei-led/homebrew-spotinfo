@@ -16,6 +16,7 @@ class Spotinfo < Formula
   depends_on "wget" => :build
 
   def install
+    ENV["VERSION"]  = "#{version}"
     system "make", "build"
     bin.install ".bin/spotinfo"
   end
