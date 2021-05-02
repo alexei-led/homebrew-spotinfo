@@ -1,8 +1,8 @@
 class Spotinfo < Formula
   desc "Explore AWS EC2 Spot: types, savings, price, and interruption frequency"
   homepage "https://github.com/alexei-led/spotinfo"
-  url "https://github.com/alexei-led/spotinfo/archive/refs/tags/0.4.1.tar.gz"
-  sha256 "3c3675f24e81967a4dfbe59035cb2047e5b379ff7187220d20d623575bce4844"
+  url "https://github.com/alexei-led/spotinfo/archive/refs/tags/1.0.7.tar.gz"
+  sha256 "5c2a809f1b59f2f6896f43f7a3bc0014533420dcab3b712f69d2db062140f7cf"
   license "Apache-2.0"
   head "https://github.com/alexei-led/spotinfo.git"
 
