@@ -1,0 +1,137 @@
+name: Auto-update Formula
+
+on:
+  schedule:
+    # Check for updates weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    # Allow manual triggering
+    inputs:
+      version:
+        description: 'Specific version to update to (optional)'
+        required: false
+        type: string
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout homebrew-spotinfo repo
+      uses: actions/checkout@v4
+      
+    - name: Get current formula version
+      id: current
+      run: |
+        CURRENT_VERSION=$(grep 'version "' Formula/spotinfo.rb | cut -d'"' -f2)
+        echo "CURRENT_VERSION=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+        echo "Current formula version: $CURRENT_VERSION"
+        
+    - name: Get latest release version
+      id: latest
+      run: |
+        if [ -n "${{ inputs.version }}" ]; then
+          LATEST_VERSION="${{ inputs.version }}"
+          echo "Using specified version: $LATEST_VERSION"
+        else
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/alexei-led/spotinfo/releases/latest | jq -r '.tag_name')
+          # Remove 'v' prefix if present
+          LATEST_VERSION="${LATEST_VERSION#v}"
+          echo "Latest release version: $LATEST_VERSION"
+        fi
+        echo "LATEST_VERSION=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+        
+    - name: Check if update needed
+      id: check
+      run: |
+        if [ "${{ steps.current.outputs.CURRENT_VERSION }}" != "${{ steps.latest.outputs.LATEST_VERSION }}" ]; then
+          echo "UPDATE_NEEDED=true" >> $GITHUB_OUTPUT
+          echo "Update needed: ${{ steps.current.outputs.CURRENT_VERSION }} -> ${{ steps.latest.outputs.LATEST_VERSION }}"
+        else
+          echo "UPDATE_NEEDED=false" >> $GITHUB_OUTPUT
+          echo "No update needed, formula is up to date"
+        fi
+        
+    - name: Download release assets and calculate SHA256
+      if: steps.check.outputs.UPDATE_NEEDED == 'true'
+      id: checksums
+      run: |
+        VERSION="${{ steps.latest.outputs.LATEST_VERSION }}"
+        
+        # Create temp directory for downloads
+        mkdir -p /tmp/spotinfo-assets
+        cd /tmp/spotinfo-assets
+        
+        # Download assets with retry logic
+        for asset in spotinfo_darwin_amd64 spotinfo_darwin_arm64 spotinfo_linux_amd64 spotinfo_linux_arm64; do
+          echo "Downloading $asset..."
+          for i in {1..3}; do
+            if curl -sL -o "$asset" "https://github.com/alexei-led/spotinfo/releases/download/${VERSION}/${asset}"; then
+              echo "Successfully downloaded $asset"
+              break
+            else
+              echo "Attempt $i failed, retrying..."
+              sleep 2
+            fi
+          done
+          
+          # Verify download
+          if [ ! -f "$asset" ] || [ ! -s "$asset" ]; then
+            echo "Error: Failed to download $asset"
+            exit 1
+          fi
+        done
+        
+        # Calculate SHA256
+        SHA_DARWIN_AMD64=$(sha256sum spotinfo_darwin_amd64 | cut -d' ' -f1)
+        SHA_DARWIN_ARM64=$(sha256sum spotinfo_darwin_arm64 | cut -d' ' -f1)
+        SHA_LINUX_AMD64=$(sha256sum spotinfo_linux_amd64 | cut -d' ' -f1)
+        SHA_LINUX_ARM64=$(sha256sum spotinfo_linux_arm64 | cut -d' ' -f1)
+        
+        # Output for next steps
+        echo "SHA_DARWIN_AMD64=${SHA_DARWIN_AMD64}" >> $GITHUB_OUTPUT
+        echo "SHA_DARWIN_ARM64=${SHA_DARWIN_ARM64}" >> $GITHUB_OUTPUT
+        echo "SHA_LINUX_AMD64=${SHA_LINUX_AMD64}" >> $GITHUB_OUTPUT
+        echo "SHA_LINUX_ARM64=${SHA_LINUX_ARM64}" >> $GITHUB_OUTPUT
+        
+        echo "Calculated checksums:"
+        echo "  Darwin AMD64: $SHA_DARWIN_AMD64"
+        echo "  Darwin ARM64: $SHA_DARWIN_ARM64"
+        echo "  Linux AMD64: $SHA_LINUX_AMD64"
+        echo "  Linux ARM64: $SHA_LINUX_ARM64"
+        
+    - name: Update formula
+      if: steps.check.outputs.UPDATE_NEEDED == 'true'
+      run: |
+        VERSION="${{ steps.latest.outputs.LATEST_VERSION }}"
+        
+        # Update version
+        sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/spotinfo.rb
+        
+        # Update SHA256 values
+        sed -i "/darwin_amd64/,/sha256/ s/sha256 \".*\"/sha256 \"${{ steps.checksums.outputs.SHA_DARWIN_AMD64 }}\"/" Formula/spotinfo.rb
+        sed -i "/darwin_arm64/,/sha256/ s/sha256 \".*\"/sha256 \"${{ steps.checksums.outputs.SHA_DARWIN_ARM64 }}\"/" Formula/spotinfo.rb
+        sed -i "/linux_amd64/,/sha256/ s/sha256 \".*\"/sha256 \"${{ steps.checksums.outputs.SHA_LINUX_AMD64 }}\"/" Formula/spotinfo.rb
+        sed -i "/linux_arm64/,/sha256/ s/sha256 \".*\"/sha256 \"${{ steps.checksums.outputs.SHA_LINUX_ARM64 }}\"/" Formula/spotinfo.rb
+        
+    - name: Commit and push changes
+      if: steps.check.outputs.UPDATE_NEEDED == 'true'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Verify changes before committing
+        if ! git diff --quiet Formula/spotinfo.rb; then
+          echo "Changes detected in formula:"
+          git diff Formula/spotinfo.rb
+          
+          git add Formula/spotinfo.rb
+          git commit -m "Auto-update spotinfo to version ${{ steps.latest.outputs.LATEST_VERSION }}"
+          git push
+          
+          echo "✅ Formula updated to version ${{ steps.latest.outputs.LATEST_VERSION }}"
+        else
+          echo "No changes detected in formula"
+        fi

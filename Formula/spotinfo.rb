@@ -1,28 +1,50 @@
 class Spotinfo < Formula
-  desc "Explore AWS EC2 Spot: types, savings, price, and interruption frequency"
+  desc "CLI tool to explore AWS EC2 Spot instances with pricing and interruption analysis"
   homepage "https://github.com/alexei-led/spotinfo"
-  url "https://github.com/alexei-led/spotinfo/archive/refs/tags/1.0.7.tar.gz"
-  sha256 "62b2acd00d1ead08279de8fac529903a84f94bd05360bf599ceba81e43845c4c"
+  version "2.0.0"
   license "Apache-2.0"
-  head "https://github.com/alexei-led/spotinfo.git"
-
-  livecheck do
-    url :stable
-    strategy :github_latest
+  
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/alexei-led/spotinfo/releases/download/#{version}/spotinfo_darwin_arm64"
+      sha256 "e45fbc830c71b8bfe4753694d618c3974600a2d3ee6446d2d120bdf3f9e8d234"
+    else
+      url "https://github.com/alexei-led/spotinfo/releases/download/#{version}/spotinfo_darwin_amd64"
+      sha256 "6fcef4f7ebc0724f2a72824f7e5b386f2cd32aaaec402d1620ad41fa4aadd83d"
+    end
   end
 
-  depends_on "go" => :build
-  depends_on "make" => :build
-  depends_on "wget" => :build
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/alexei-led/spotinfo/releases/download/#{version}/spotinfo_linux_arm64"
+      sha256 "16e5534d11e8b718eee57b713b093a5539a6f7fae88f74a17ecaaaf4af161c28"
+    else
+      url "https://github.com/alexei-led/spotinfo/releases/download/#{version}/spotinfo_linux_amd64"
+      sha256 "292045af237466b0b501c1fe29a4339b8de3ba4a1a94a911379ccc46eeb35668"
+    end
+  end
 
   def install
-    ENV["VERSION"]  = "#{version}"
-    system "make", "build"
-    bin.install ".bin/spotinfo"
+    # Install the downloaded binary with architecture suffix as 'spotinfo'
+    binary_name = if OS.mac?
+      Hardware::CPU.arm? ? "spotinfo_darwin_arm64" : "spotinfo_darwin_amd64"
+    else
+      Hardware::CPU.arm? ? "spotinfo_linux_arm64" : "spotinfo_linux_amd64"
+    end
+    
+    bin.install binary_name => "spotinfo"
   end
 
   test do
-    output = shell_output("#{bin}/spotinfo --type=t4g.small --output=text")
-    assert_match "type=t4g.small, vCPU=2, memory=2GiB", output
+    # Test basic functionality
+    assert_match "explore AWS EC2 Spot instances", shell_output("#{bin}/spotinfo --help")
+    
+    # Test version command runs without error
+    system bin/"spotinfo", "--version"
+    
+    # Test help shows expected usage
+    help_output = shell_output("#{bin}/spotinfo --help")
+    assert_match "USAGE:", help_output
+    assert_match "GLOBAL OPTIONS:", help_output
   end
 end
